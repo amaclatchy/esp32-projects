@@ -1,1 +1,3 @@
-# esp32-hello-world
+# esp32-projects
+
+A home for my ESP32 related projects.
