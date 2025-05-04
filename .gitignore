@@ -3,4 +3,4 @@ managed_components
 sdkconfig.old
 dependencies.lock
 .vscode
-.code-workspace
+esp32-projects.code-workspace
