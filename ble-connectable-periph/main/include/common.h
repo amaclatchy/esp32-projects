@@ -25,6 +25,6 @@
 
 /* Defines */
 #define TAG "amac_beacon"
-#define DEVICE_NAME "amac_beacon"
+#define DEVICE_NAME "amac_periph"
 
 #endif // COMMON_H

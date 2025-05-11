@@ -1,9 +1,12 @@
 #include "gap.h"
 #include "common.h"
+#include "led.h"
 
 // Private functions
 inline static void format_addr(char *addr_str, uint8_t addr[]);
 static void start_advertising(void);
+static void print_conn_desc(struct ble_gap_conn_desc *desc);
+static int gap_event_handler(struct ble_gap_event *event, void *arg);
 
 // Private variables
 static uint8_t own_addr_type;
@@ -56,6 +59,10 @@ static void start_advertising(void) {
 	rsp_fields.device_addr_type = own_addr_type;
 	rsp_fields.device_addr_is_present = 1;
 
+	// Set advertising interval
+	rsp_fields.adv_itvl = BLE_GAP_ADV_ITVL_MS(500);
+	rsp_fields.adv_itvl_is_present = 1;
+
 	// Set URI. I don't know what this is.
 	rsp_fields.uri = esp_uri;
 	rsp_fields.uri_len = sizeof(esp_uri);
@@ -67,13 +74,111 @@ static void start_advertising(void) {
 		return;
 	}
 
-	// Set beacon to be non-connectable, and in general discoverable mode
-	adv_params.conn_mode = BLE_GAP_CONN_MODE_NON;
+	// Set beacon to be connectable, and in general discoverable mode
+	adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
 	adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
 
+	// Set advertising interval
+	adv_params.itvl_max = BLE_GAP_ADV_ITVL_MS(510);
+	adv_params.itvl_min = BLE_GAP_ADV_ITVL_MS(500);
+
 	// Start advertising
-	rc = ble_gap_adv_start(own_addr_type, NULL, BLE_HS_FOREVER, &adv_params, NULL, NULL);
+	rc = ble_gap_adv_start(own_addr_type, NULL, BLE_HS_FOREVER, &adv_params, gap_event_handler, NULL);
+	
+	if (rc != 0) {
+		ESP_LOGE(TAG, "Failed to start advertising. Error code: %d", rc);
+		return;
+	}
+	
 	ESP_LOGI(TAG, "Advertising started!");
+}
+
+static int gap_event_handler(struct ble_gap_event *event, void *arg) {
+	int rc = 0;
+	struct ble_gap_conn_desc desc;
+
+	switch(event->type) {
+		case BLE_GAP_EVENT_CONNECT:
+			// Log wether connection was successful
+			ESP_LOGI(TAG, "Connection %s : Status=%d", event->connect.status == 0 ? "established" : "failed", event->connect.status);
+
+			// Handle successful connection
+			if (event->connect.status == 0) {
+				rc = ble_gap_conn_find(event->connect.conn_handle, &desc);
+				if (rc != 0) {
+					ESP_LOGE(TAG, "Failed to find connection via handle. Error code: %d", rc);
+					return rc;
+				}
+
+				// Print connection descriptor and turn on LED
+				print_conn_desc(&desc);
+				led_on();
+
+				// Update connection parameters
+				struct ble_gap_upd_params params = {.itvl_min = desc.conn_itvl,
+													.itvl_max = desc.conn_itvl,
+													.latency = 3,
+													.supervision_timeout = desc.supervision_timeout
+													};
+				rc = ble_gap_update_params(event->connect.conn_handle, &params);
+				if (rc != 0) {
+					ESP_LOGE(TAG, "Failed to update connection parameters. Error code: %d", rc);
+					return rc;
+				}
+			} 
+			// Handle failed connection
+			else {
+				// Reset advertising
+				start_advertising();
+			}
+			return rc;
+		
+		case BLE_GAP_EVENT_DISCONNECT:
+			ESP_LOGI(TAG, "Disconnected from peer. Reason: %d", event->disconnect.reason);
+
+			led_off();
+
+			// Restart advertising
+			start_advertising();
+			return rc;
+
+		case BLE_GAP_EVENT_CONN_UPDATE:
+			ESP_LOGI(TAG, "Connection updated! Status=%d", event->conn_update.status);
+
+			// Print updated connection descriptor
+			rc = ble_gap_conn_find(event->conn_update.conn_handle, &desc);
+			if (rc != 0) {
+				ESP_LOGE(TAG, "Failed to find connection by handle. Error code: %d", rc);
+				return rc;
+			}
+
+			print_conn_desc(&desc);
+			return rc;
+	}
+	return rc;
+}
+
+static void print_conn_desc(struct ble_gap_conn_desc *desc) {
+	char addr_str[18] = {0};
+
+	// Print connection handle
+	ESP_LOGI(TAG, "Connection handle: %d", desc->conn_handle);
+
+	// Print device id address
+	format_addr(addr_str, desc->our_id_addr.val);
+	ESP_LOGI(TAG, "Device id address: type=%d, value=%s", desc->our_id_addr.type, addr_str);
+
+	// Print peer id address
+	format_addr(addr_str, desc->peer_id_addr.val);
+	ESP_LOGI(TAG, "Peer id address: type=%d, value=%s", desc->peer_id_addr.type, addr_str);
+
+	// Print connection info
+	ESP_LOGI(TAG,
+			"conn_itvl=%d, conn_latency=%d, supervision_timeout=%d, "
+			"encrypted=%d, authenticated=%d, bonded=%d\n",
+			desc->conn_itvl, desc->conn_latency, desc->supervision_timeout,
+			desc->sec_state.encrypted, desc->sec_state.authenticated,
+			desc->sec_state.bonded);
 }
 
 int gap_init(void) {
@@ -126,6 +231,9 @@ void adv_init(void) {
 	// Format address to be human readable and log
 	format_addr(addr_str, addr_val);
 	ESP_LOGI(TAG, "Device address: %s", addr_str);
+
+	// Initialize LED
+	led_init();
 
 	start_advertising();
 }
