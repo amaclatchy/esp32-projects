@@ -1,3 +1,6 @@
 [submodule "lcd-hello-world/main/components/esp-idf-ssd1306"]
 	path = lcd-hello-world/main/components/esp-idf-ssd1306
 	url = https://github.com/nopnop2002/esp-idf-ssd1306.git
+[submodule "lcd-image/main/components/esp-idf-ssd1306"]
+	path = lcd-image/main/components/esp-idf-ssd1306
+	url = https://github.com/nopnop2002/esp-idf-ssd1306.git
