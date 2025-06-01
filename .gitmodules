@@ -4,3 +4,6 @@
 [submodule "lcd-image/main/components/esp-idf-ssd1306"]
 	path = lcd-image/main/components/esp-idf-ssd1306
 	url = https://github.com/nopnop2002/esp-idf-ssd1306.git
+[submodule "button-interrupt/main/components/esp-idf-ssd1306"]
+	path = button-interrupt/main/components/esp-idf-ssd1306
+	url = https://github.com/nopnop2002/esp-idf-ssd1306.git
