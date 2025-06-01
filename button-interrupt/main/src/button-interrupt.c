@@ -7,6 +7,8 @@
 #include "driver/gpio.h"
 #include "esp_timer.h"
 #include "esp_log.h"
+#include "iot_button.h"
+#include "button_gpio.h"
 
 #include "ssd1306.h"
 #include "font8x8_basic.h"
@@ -17,10 +19,15 @@
 #define ROWS 32
 #define ROW_HEIGHT 8
 #define ROW_LENGTH 32
-#define BUTTON GPIO_NUM_5
+#define TEAM1_BUTTON GPIO_NUM_4
+#define TEAM2_BUTTON GPIO_NUM_5
+#define BUTTON_ACTIVE_LEVEL 0
 
 void display_text_right_justified(const char *text, int page);
 void display_bitmap_right_justified(const uint8_t *bitmap, int bitmap_dimension, int page);
+void setup_button(gpio_num_t pin, button_cb_t f_callback);
+void increment_team1(void *arg, void *usr_data);
+void increment_team2(void *arg, void *usr_data);
 
 TaskHandle_t h_displayTextTask = NULL;
 QueueHandle_t interruptQueue;
@@ -37,29 +44,14 @@ volatile int team1_score;
 volatile int team2_score;
 volatile uint8_t suit[BITMAP_DIM];
 
-static void IRAM_ATTR gpio_interrupt_handler(void *args)
+void increment_team1(void *arg, void *usr_data)
 {
-	int pinNumber = (int)args;
-	xQueueSendFromISR(interruptQueue, &pinNumber, NULL);
+	team1_score = team1_score + 1;
 }
 
-void update_team1_score_task(void *params)
+void increment_team2(void *arg, void *usr_data)
 {
-	int pin_number = 0;
-	uint32_t last_update = esp_timer_get_time() / 1000;
-	uint32_t now;
-	while (1)
-	{
-		if (xQueueReceive(interruptQueue, &pin_number, portMAX_DELAY))
-		{
-			now = esp_timer_get_time() / 1000;
-			if (now - last_update > 300)
-			{
-				team1_score = team1_score + 1;
-				last_update = now;
-			}
-		}
-	}
+	team2_score = team2_score + 1;
 }
 
 void update_display_task(void *arg)
@@ -75,11 +67,13 @@ void update_display_task(void *arg)
 		// Add dynamic text
 		display_text_right_justified("Amelia", 0);
 		display_bitmap_right_justified(DIAMOND, BITMAP_DIM, 1);
-		
+
 		char team1_score_str[2];
 		sprintf(team1_score_str, "%d", team1_score);
 		display_text_right_justified(team1_score_str, 2);
-		display_text_right_justified("7", 3);
+		char team2_score_str[2];
+		sprintf(team2_score_str, "%d", team2_score);
+		display_text_right_justified(team2_score_str, 3);
 
 		vTaskDelay(100 / portTICK_PERIOD_MS);
 	}
@@ -109,14 +103,28 @@ void display_text_right_justified(const char *text, int page)
 	}
 }
 
+void setup_button(gpio_num_t pin, button_cb_t f_callback)
+{
+	button_config_t button_config = {
+		.long_press_time = CONFIG_BUTTON_LONG_PRESS_TIME_MS,
+		.short_press_time = CONFIG_BUTTON_SHORT_PRESS_TIME_MS};
+	button_gpio_config_t button_gpio_config = {
+		.active_level = BUTTON_ACTIVE_LEVEL,
+		.gpio_num = pin,
+	};
+	button_handle_t gpio_btn = NULL;
+
+	iot_button_new_gpio_device(&button_config, &button_gpio_config, &gpio_btn);
+	if (NULL == gpio_btn)
+	{
+		ESP_LOGE(TAG, "Button create failed");
+	}
+	iot_button_register_cb(gpio_btn, BUTTON_SINGLE_CLICK, NULL, f_callback, NULL);
+}
+
 void app_main(void)
 {
-	ESP_LOGI(TAG, "INTERFACE is i2c");
-	ESP_LOGI(TAG, "CONFIG_SDA_GPIO=%d", CONFIG_SDA_GPIO);
-	ESP_LOGI(TAG, "CONFIG_SCL_GPIO=%d", CONFIG_SCL_GPIO);
-	ESP_LOGI(TAG, "CONFIG_RESET_GPIO=%d", CONFIG_RESET_GPIO);
 	i2c_master_init(&dev, CONFIG_SDA_GPIO, CONFIG_SCL_GPIO, CONFIG_RESET_GPIO);
-
 	ssd1306_init(&dev, 128, 32);
 	ssd1306_contrast(&dev, 0xff);
 	ssd1306_clear_screen(&dev, false);
@@ -129,17 +137,10 @@ void app_main(void)
 	strcpy(line3, "Team 2:");
 
 	team1_score = 0;
+	team2_score = 0;
 
-	esp_rom_gpio_pad_select_gpio(BUTTON);
-	gpio_set_direction(BUTTON, GPIO_MODE_INPUT);
-	gpio_set_pull_mode(BUTTON, GPIO_PULLUP_ONLY);
-	gpio_set_intr_type(BUTTON, GPIO_INTR_NEGEDGE);
-
-	interruptQueue = xQueueCreate(10, sizeof(int));
-	xTaskCreate(update_team1_score_task, "update_team1_score", 2048, NULL, 1, NULL);
-
-	gpio_install_isr_service(0);
-	gpio_isr_handler_add(BUTTON, gpio_interrupt_handler, (void *)BUTTON);
+	setup_button(TEAM1_BUTTON, increment_team1);
+	setup_button(TEAM2_BUTTON, increment_team2);
 
 	xTaskCreate(update_display_task, "update_display", 2048, NULL, 10, &h_displayTextTask);
 }
