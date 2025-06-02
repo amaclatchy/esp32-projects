@@ -20,6 +20,7 @@
 #define ROW_HEIGHT 8
 #define ROW_LENGTH 32
 #define DEALER_BUTTON GPIO_NUM_15
+#define SUIT_BUTTON GPIO_NUM_18
 #define TEAM1_BUTTON GPIO_NUM_4
 #define TEAM2_BUTTON GPIO_NUM_5
 #define BUTTON_ACTIVE_LEVEL 0
@@ -29,6 +30,7 @@ void display_bitmap_right_justified(const uint8_t *bitmap, int bitmap_dimension,
 void setup_button(gpio_num_t pin, button_cb_t f_single_callback, button_cb_t f_double_callback);
 void increment_dealer(void *arg, void *usr_data);
 void decrement_dealer(void *arg, void *usr_data);
+void increment_suit(void *arg, void *usr_data);
 void increment_team1(void *arg, void *usr_data);
 void decrement_team1(void *arg, void *usr_data);
 void increment_team2(void *arg, void *usr_data);
@@ -39,6 +41,7 @@ QueueHandle_t interruptQueue;
 SSD1306_t dev;
 int lcd_width;
 const char *players[4];
+const uint8_t *suits[4];
 
 char line0[32];
 char line1[32];
@@ -46,6 +49,7 @@ char line2[32];
 char line3[32];
 
 volatile int current_dealer;
+volatile int current_suit;
 volatile int team1_score;
 volatile int team2_score;
 volatile uint8_t suit[BITMAP_DIM];
@@ -57,6 +61,7 @@ void increment_dealer(void *arg, void *usr_data)
 	} else {
 		current_dealer = current_dealer + 1;
 	}
+	current_suit = -1;
 }
 
 void decrement_dealer(void *arg, void *usr_data)
@@ -65,6 +70,16 @@ void decrement_dealer(void *arg, void *usr_data)
 		current_dealer = 3;
 	} else {
 		current_dealer = current_dealer - 1;
+	}
+	current_suit = -1;
+}
+
+void increment_suit(void *arg, void *usr_data)
+{
+	if (current_suit >= 3 || current_suit < 0) {
+		current_suit = 0;
+	} else {
+		current_suit = current_suit + 1;
 	}
 }
 
@@ -94,10 +109,10 @@ void decrement_team2(void *arg, void *usr_data)
 
 void update_display_task(void *arg)
 {
-	int displayed_dealer = current_dealer;
+	int displayed_dealer = -1;
+	int displayed_suit = -1;
 	while (1)
 	{
-		// Add dynamic text
 		if(displayed_dealer != current_dealer) {
 			int cLen = (lcd_width/8) - (strlen(line0));
 			char *str = malloc(cLen + 1);
@@ -105,11 +120,18 @@ void update_display_task(void *arg)
 			str[cLen] = '\0';
 			display_text_right_justified(str, 0);
 			displayed_dealer = current_dealer;
+			display_text_right_justified(players[current_dealer], 0);
 		}
 
-		display_text_right_justified(players[current_dealer], 0);
-		display_bitmap_right_justified(DIAMOND, BITMAP_DIM, 1);
-
+		if (current_suit < 0) {
+			display_bitmap_right_justified(BLANK, BITMAP_DIM, 1);
+			displayed_suit = -1;
+		}
+		else if (displayed_suit != current_suit) {
+			display_bitmap_right_justified(suits[current_suit], BITMAP_DIM, 1);
+			displayed_suit = current_suit;
+		}
+		
 		char team1_score_str[2];
 		sprintf(team1_score_str, "%d", team1_score);
 		display_text_right_justified(team1_score_str, 2);
@@ -147,6 +169,10 @@ void display_text_right_justified(const char *text, int page)
 
 void setup_button(gpio_num_t pin, button_cb_t f_single_callback, button_cb_t f_double_callback)
 {
+	gpio_reset_pin(pin);
+	gpio_set_direction(pin, GPIO_MODE_INPUT);
+	gpio_set_pull_mode(pin, GPIO_PULLUP_ONLY);
+
 	button_config_t button_config = {
 		.long_press_time = CONFIG_BUTTON_LONG_PRESS_TIME_MS,
 		.short_press_time = CONFIG_BUTTON_SHORT_PRESS_TIME_MS};
@@ -192,11 +218,18 @@ void app_main(void)
 	players[2] = "Fay";
 	players[3] = "Tyler";
 
+	suits[0] = HEART;
+	suits[1] = DIAMOND;
+	suits[2] = CLUB;
+	suits[3] = SPADE;
+
 	team1_score = 0;
 	team2_score = 0;
 	current_dealer = 0;
+	current_suit = -1;
 
 	setup_button(DEALER_BUTTON, increment_dealer, decrement_dealer);
+	setup_button(SUIT_BUTTON, increment_suit, NULL);
 	setup_button(TEAM1_BUTTON, increment_team1, decrement_team1);
 	setup_button(TEAM2_BUTTON, increment_team2, decrement_team2);
 
